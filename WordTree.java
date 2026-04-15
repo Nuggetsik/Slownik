@@ -1,4 +1,6 @@
 import java.util.*;
+import java.nio.charset.StandardCharsets;
+import java.io.*;
 
 /**
  * Klasa reprezentująca pojedynczy węzeł w naszym drzewie.
@@ -68,9 +70,7 @@ class WordTree {
     }
 
     /**
-     * Wyświetla drzewo poziom po poziomie
-     * Level 0: korzeń [*]
-     * Level 1: pierwsze litery wszystkich słów itd.
+     * Wyświetla drzewo poziom po poziomie.
      */
     public void printByLevels() {
         if (root == null) return;
@@ -83,17 +83,14 @@ class WordTree {
             int nodesInThisLevel = queue.size();      // Ile węzłów jest na bieżącym poziomie
             List<String> levelValues = new ArrayList<>();
 
-            // Przetwarzamy wszystkie węzły z bieżącego poziomu
             for (int i = 0; i < nodesInThisLevel; i++) {
                 Node node = queue.poll();
 
-                // Jeśli to koniec słowa, dodajemy gwiazdkę dla czytelności
                 String display = String.valueOf(node.value);
                 if (node.isEndOfWord) display += "*";
 
                 levelValues.add(display);
 
-                // Dodajemy do kolejki WSZYSTKIE dzieci
                 for (List<Node> childList : node.children.values()) {
                     for (Node child : childList) {
                         queue.add(child);
@@ -101,7 +98,6 @@ class WordTree {
                 }
             }
 
-            // Wyświetlamy bieżący poziom
             System.out.println("Level " + level + " : " + levelValues);
             level++;
         }
@@ -115,12 +111,10 @@ class WordTree {
     }
 
     private void printWordsHelper(Node node, String currentWord) {
-        // Jeśli dotarliśmy do końca słowa - wypisujemy je razem z tłumaczeniami
         if (node.isEndOfWord && !node.translations.isEmpty()) {
             System.out.println("[" + currentWord + "] → " + node.translations);
         }
 
-        // Rekurencyjnie idziemy do wszystkich dzieci
         for (List<Node> childList : node.children.values()) {
             for (Node child : childList) {
                 printWordsHelper(child, currentWord + child.value);
@@ -128,19 +122,135 @@ class WordTree {
         }
     }
 
-    // ==================== MAIN ====================
-    public static void main(String[] args) {
-        WordTree tree = new WordTree();
+    /**
+     * Szuka wszystkich tłumaczeń dla podanego polskiego słowa.
+     */
+    public List<String> findTranslations(String polish) {
+        Node target = findNode(polish);
+        if (target != null && target.isEndOfWord) {
+            return new ArrayList<>(target.translations);
+        }
+        return Collections.emptyList();
+    }
 
-        tree.addWord("DOM", "HOUSE");
-        tree.addWord("DOM", "HOME");
-        tree.addWord("DACH", "ROOF");
-        tree.addWord("KOT", "CAT");
+    /**
+     * Usuwa konkretne tłumaczenie dla danego słowa.
+     */
+    public void deleteTranslation(String polish, String englishToRemove) {
+        deleteRecursive(root, polish, 0, englishToRemove);
+    }
 
-        System.out.println("=== WYDRUK POZIOMAMI ===");
-        tree.printByLevels();
+    /**
+     * Prywatna metoda pomocnicza do znalezienia węzła odpowiadającego całemu słowu.
+     */
+    private Node findNode(String word) {
+        Node current = root;
+        for (char c : word.toCharArray()) {
+            List<Node> nodes = current.children.get(c);
+            if (nodes == null || nodes.isEmpty()) return null;
+            // Zgodnie z logiką addWord, idziemy wzdłuż pierwszej dostępnej gałęzi
+            current = nodes.get(0);
+        }
+        return current;
+    }
 
-        System.out.println("\n=== Pełna lista słów i tłumaczeń ===");
-        tree.printWords();
+    /**
+     * Rekurencyjne usuwanie tłumaczenia oraz czyszczenie nieużywanych węzłów drzewa.
+     */
+    private boolean deleteRecursive(Node current, String word, int index, String translation) {
+        // Przypadek bazowy: dotarliśmy do końca słowa
+        if (index == word.length()) {
+            if (!current.isEndOfWord) return false;
+
+            // Usuwamy wybrane tłumaczenie z listy
+            current.translations.remove(translation);
+
+            // Jeśli słowo nie ma już żadnych tłumaczeń, przestaje być końcem słowa
+            if (current.translations.isEmpty()) {
+                current.isEndOfWord = false;
+            }
+
+            // Węzeł można usunąć tylko jeśli nie jest końcem innego słowa i nie ma dzieci
+            return !current.isEndOfWord && current.children.isEmpty();
+        }
+
+        char c = word.charAt(index);
+        List<Node> nodes = current.children.get(c);
+        if (nodes == null || nodes.isEmpty()) return false;
+
+        // Kontynuujemy usuwanie w głąb drzewa
+        Node child = nodes.get(0);
+        boolean canDeleteChild = deleteRecursive(child, word, index + 1, translation);
+
+        // Jeśli dziecko zwróciło true, usuwamy je z listy dzieci obecnego węzła
+        if (canDeleteChild) {
+            nodes.remove(child);
+            if (nodes.isEmpty()) {
+                current.children.remove(c);
+            }
+        }
+
+        // Sprawdzamy, czy obecny węzeł również stał się bezużyteczny i może być usunięty
+        return !current.isEndOfWord && current.children.isEmpty();
+    }
+
+    /**
+     * Zapisuje całą zawartość drzewa do pliku tekstowego w formacie UTF-8.
+     */
+    public void saveToFile(String filename) {
+        try (PrintWriter writer = new PrintWriter(new OutputStreamWriter(
+                new FileOutputStream(filename), StandardCharsets.UTF_8))) {
+            saveRecursive(root, "", writer);
+            System.out.println("Słownik został zapisany w " + filename);
+        } catch (IOException e) {
+            System.err.println("Błąd podczas zapisywania: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Rekurencyjnie przechodzi przez drzewo i zapisuje słowa wraz z tłumaczeniami (format SŁOWO;T1,T2).
+     */
+    private void saveRecursive(Node node, String currentWord, PrintWriter writer) {
+        String wordToSave = (node.value == '*') ? "" : currentWord;
+
+        if (node.isEndOfWord && !node.translations.isEmpty()) {
+            // Zapisujemy słowo polskie i listę tłumaczeń oddzieloną przecinkami
+            writer.println(wordToSave + ";" + String.join(",", node.translations));
+        }
+
+        // Przechodzimy przez wszystkie gałęzie dzieci
+        for (List<Node> childList : node.children.values()) {
+            for (Node child : childList) {
+                saveRecursive(child, wordToSave + child.value, writer);
+            }
+        }
+    }
+
+    /**
+     * Wczytuje dane słownika z pliku i buduje strukturę drzewa.
+     */
+    public void loadFromFile(String filename) {
+        File file = new File(filename);
+        if (!file.exists()) return;
+
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(
+                new FileInputStream(file), StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                // Rozdzielamy polskie słowo od tłumaczeń (używając średnika jako separatora)
+                String[] parts = line.split(";");
+                if (parts.length == 2) {
+                    String polish = parts[0];
+                    String[] engTranslations = parts[1].split(",");
+                    // Dodajemy każde tłumaczenie do drzewa
+                    for (String eng : engTranslations) {
+                        addWord(polish, eng);
+                    }
+                }
+            }
+            System.out.println("Słownik został pobrany z " + filename);
+        } catch (IOException e) {
+            System.err.println("Błąd podczas ładowania: " + e.getMessage());
+        }
     }
 }

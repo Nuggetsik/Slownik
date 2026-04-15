@@ -1,104 +1,293 @@
 import javax.swing.*;
+import javax.swing.border.CompoundBorder;
+import javax.swing.border.EmptyBorder;
+import javax.swing.border.LineBorder;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
 import java.awt.*;
-import java.awt.event.*;
-import java.util.LinkedHashMap;
-import java.util.Map;
 
 public class GUI extends JFrame {
-    private WordTree tree = new WordTree();
+    // --- Paleta kolorów (Slate/Gray) ---
+    private final Color BG_COLOR = new Color(40, 40, 40);      // Tło główne
+    private final Color PANEL_COLOR = new Color(50, 50, 50);   // Tło list i pól
+    private final Color TEXT_COLOR = new Color(210, 210, 210); // Jasnoszary tekst
+    private final Color ACCENT_COLOR = new Color(75, 75, 75);  // Kolor obramowań i zaznaczenia
+    private final Color HEADER_TEXT = new Color(130, 130, 130); // Kolor nagłówków
 
-    private JTextField searchField;
-    private DefaultListModel<String> polishModel;
-    private DefaultListModel<String> englishModel;
-
+    private DefaultListModel<String> polishModel = new DefaultListModel<>();
+    private DefaultListModel<String> englishModel = new DefaultListModel<>();
     private JList<String> polishList;
     private JList<String> englishList;
+    private JTextField searchField;
 
-    private Map<String, String> dictionary = new LinkedHashMap<>();
+    private WordTree tree = new WordTree();
 
     public GUI() {
+        // Wczytanie słownika z pliku przy starcie
+        tree.loadFromFile("dictionary.txt");
 
-        setTitle("Polish - English Dictionary");
-        setSize(600, 500);
+        // Konfiguracja motywu graficznego
+        setupTheme();
+        customizeScrollbar();
+
+        setTitle("Słownik Polsko-Angielski");
+        setSize(800, 600);
         setDefaultCloseOperation(EXIT_ON_CLOSE);
-        setLayout(new BorderLayout());
+        setLocationRelativeTo(null);
 
-        // Pasek wyszukiwania
+        // Główny panel z marginesami
+        JPanel mainPanel = new JPanel(new BorderLayout(15, 15));
+        mainPanel.setBackground(BG_COLOR);
+        mainPanel.setBorder(new EmptyBorder(20, 20, 20, 20));
+        setContentPane(mainPanel);
+
+        // --- Pasek wyszukiwania (Góra) ---
         searchField = new JTextField();
-        add(searchField, BorderLayout.NORTH);
+        styleComponent(searchField);
+        searchField.setCaretColor(Color.WHITE);
 
-        // Lista modeli
-        polishModel = new DefaultListModel<>();
-        englishModel = new DefaultListModel<>();
+        // Nasłuchiwanie zmian w polu tekstowym (wyszukiwanie "na żywo")
+        searchField.getDocument().addDocumentListener(new DocumentListener() {
+            public void insertUpdate(DocumentEvent e) { update(); }
+            public void removeUpdate(DocumentEvent e) { update(); }
+            public void changedUpdate(DocumentEvent e) { update(); }
+            private void update() { refreshLists(searchField.getText().trim()); }
+        });
 
-        polishList = new JList<>(polishModel);
-        englishList = new JList<>(englishModel);
+        JPanel topPanel = new JPanel(new BorderLayout(10, 0));
+        topPanel.setOpaque(false);
+        JLabel searchLabel = new JLabel("SZUKAJ:");
+        searchLabel.setForeground(HEADER_TEXT);
+        searchLabel.setFont(new Font("SansSerif", Font.BOLD, 10));
+        topPanel.add(searchLabel, BorderLayout.WEST);
+        topPanel.add(searchField, BorderLayout.CENTER);
+        mainPanel.add(topPanel, BorderLayout.NORTH);
 
-        // Tworzenie paneli z etykietami
-        JPanel polishPanel = new JPanel();
-        polishPanel.setLayout(new BorderLayout());
-        polishPanel.add(new JLabel("Polish Words", SwingConstants.CENTER), BorderLayout.NORTH);
-        polishPanel.add(new JScrollPane(polishList), BorderLayout.CENTER);
+        // --- Listy słów (Środek) ---
+        polishList = createFormalList(polishModel);
+        englishList = createFormalList(englishModel);
 
-        JPanel englishPanel = new JPanel();
-        englishPanel.setLayout(new BorderLayout());
-        englishPanel.add(new JLabel("English Words", SwingConstants.CENTER), BorderLayout.NORTH);
-        englishPanel.add(new JScrollPane(englishList), BorderLayout.CENTER);
+        // Synchronizacja zaznaczenia między listami
+        polishList.addListSelectionListener(e -> {
+            if (!e.getValueIsAdjusting()) englishList.setSelectedIndex(polishList.getSelectedIndex());
+        });
+        englishList.addListSelectionListener(e -> {
+            if (!e.getValueIsAdjusting()) polishList.setSelectedIndex(englishList.getSelectedIndex());
+        });
 
-        JSplitPane splitPane = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, polishPanel, englishPanel);
-        splitPane.setDividerLocation(250);
+        // Panel dzielony (SplitPane) dla równego rozkładu list
+        JSplitPane splitPane = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT,
+                createSection("Polskie Słowa", polishList),
+                createSection("Tłumaczenie Angielskie", englishList));
 
-        add(splitPane, BorderLayout.CENTER);
+        // Synchronizacja przewijania (Scroll) między listami
+        JScrollPane leftScroll = (JScrollPane) ((JPanel) splitPane.getLeftComponent()).getComponent(1);
+        JScrollPane rightScroll = (JScrollPane) ((JPanel) splitPane.getRightComponent()).getComponent(1);
+        rightScroll.getVerticalScrollBar().setModel(leftScroll.getVerticalScrollBar().getModel());
 
-        // Przyciski
-        JButton addButton = new JButton("+");
-        JButton deleteButton = new JButton("-");
+        splitPane.setDividerSize(2);
+        splitPane.setResizeWeight(0.5);
+        splitPane.setBorder(null);
+        mainPanel.add(splitPane, BorderLayout.CENTER);
 
-        JPanel buttonPanel = new JPanel();
-        buttonPanel.add(addButton);
+        // --- Przyciski (Dół) ---
+        JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 0));
+        buttonPanel.setOpaque(false);
+
+        JButton addButton = createFormalButton("+ DODAJ SŁOWO");
+        JButton deleteButton = createFormalButton("- USUŃ WYBRANE");
+
         buttonPanel.add(deleteButton);
+        buttonPanel.add(addButton);
+        mainPanel.add(buttonPanel, BorderLayout.SOUTH);
 
-        add(buttonPanel, BorderLayout.SOUTH);
-
-        // Akcja dodawania słowa
+        // Powiązanie przycisków z logiką WordTree
         addButton.addActionListener(e -> openAddDialog());
+        deleteButton.addActionListener(e -> deleteSelectedEntry());
 
+        // Ustawienie podziału na środku po zainicjowaniu komponentów
+        SwingUtilities.invokeLater(() -> splitPane.setDividerLocation(0.5));
 
+        // Pierwsze odświeżenie listy (wyświetlenie wszystkich słów)
+        refreshLists("");
     }
 
+    /**
+     * Ustawia ogólne kolory i właściwości komponentów UI.
+     */
+    private void setupTheme() {
+        UIManager.put("SplitPane.background", BG_COLOR);
+        UIManager.put("SplitPaneDivider.border", BorderFactory.createEmptyBorder());
+        UIManager.put("OptionPane.background", BG_COLOR);
+        UIManager.put("Panel.background", BG_COLOR);
+        UIManager.put("OptionPane.messageForeground", TEXT_COLOR);
+        UIManager.put("Button.background", PANEL_COLOR);
+        UIManager.put("Button.foreground", TEXT_COLOR);
+    }
+
+    /**
+     * Otwiera okno dialogowe do dodawania nowego słowa i tłumaczenia.
+     */
     private void openAddDialog() {
+        JTextField pField = new JTextField();
+        JTextField eField = new JTextField();
+        styleComponent(pField);
+        styleComponent(eField);
 
-        JTextField polishField = new JTextField();
-        JTextField englishField = new JTextField();
+        Object[] message = { "Polskie Słowo:", pField, "Angielskie Tłumaczenie:", eField };
 
-        Object[] message = {
-                "Polish word:", polishField,
-                "English translation:", englishField
-        };
+        int option = JOptionPane.showConfirmDialog(this, message, "Dodaj nowy wpis",
+                JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
 
-        int option = JOptionPane.showConfirmDialog(
-                this,
-                message,
-                "Add new word",
-                JOptionPane.OK_CANCEL_OPTION
-        );
-
-        if(option == JOptionPane.OK_OPTION){
-
-            String polish = polishField.getText();
-            String english = englishField.getText();
-
-
+        if (option == JOptionPane.OK_OPTION) {
+            String p = pField.getText().trim().toUpperCase();
+            String e = eField.getText().trim().toUpperCase();
+            if (!p.isEmpty() && !e.isEmpty()) {
+                tree.addWord(p, e);
+                tree.saveToFile("dictionary.txt"); // Zapis do pliku po dodaniu
+                refreshLists(searchField.getText());
+            }
         }
     }
 
+    /**
+     * Usuwa wybraną parę słowo-tłumaczenie z drzewa i odświeża widok.
+     */
+    private void deleteSelectedEntry() {
+        int index = polishList.getSelectedIndex();
+        if (index != -1) {
+            String polishWord = polishModel.getElementAt(index);
+            String englishWord = englishModel.getElementAt(index);
 
+            tree.deleteTranslation(polishWord, englishWord);
+            tree.saveToFile("dictionary.txt"); // Zapis do pliku po usunięciu
 
+            refreshLists(searchField.getText());
+        } else {
+            JOptionPane.showMessageDialog(this, "Wybierz słowo z listy do usunięcia.");
+        }
+    }
 
+    /**
+     * Czyści modele i ponownie wypełnia je danymi z drzewa na podstawie filtra.
+     */
+    private void refreshLists(String filter) {
+        polishModel.clear();
+        englishModel.clear();
+        fillModelsFromTree(tree.root, "", filter);
+    }
+
+    /**
+     * Rekurencyjnie przeszukuje drzewo w celu znalezienia słów pasujących do filtra.
+     */
+    private void fillModelsFromTree(Node node, String currentWord, String filter) {
+        String wordToDisplay = (node.value == '*') ? "" : currentWord;
+
+        if (node.isEndOfWord) {
+            // Filtracja typu "zawiera" (można zmienić na startsWith dla dopasowania od początku)
+            if (filter.isEmpty() || wordToDisplay.contains(filter.toUpperCase())) {
+                for (String trans : node.translations) {
+                    polishModel.addElement(wordToDisplay);
+                    englishModel.addElement(trans);
+                }
+            }
+        }
+
+        // Przejście przez wszystkie dzieci węzła
+        for (java.util.List<Node> childList : node.children.values()) {
+            for (Node child : childList) {
+                fillModelsFromTree(child, wordToDisplay + child.value, filter);
+            }
+        }
+    }
+
+    // --- Metody pomocnicze i stylizacja ---
+
+    private JList<String> createFormalList(DefaultListModel<String> model) {
+        JList<String> list = new JList<>(model);
+        list.setBackground(PANEL_COLOR);
+        list.setForeground(TEXT_COLOR);
+        list.setSelectionBackground(ACCENT_COLOR);
+        list.setSelectionForeground(Color.WHITE);
+        list.setFont(new Font("Monospaced", Font.PLAIN, 14));
+        list.setFixedCellHeight(30);
+        return list;
+    }
+
+    private JPanel createSection(String title, JList<String> list) {
+        JPanel panel = new JPanel(new BorderLayout(5, 5));
+        panel.setOpaque(false);
+
+        JLabel header = new JLabel(title.toUpperCase());
+        header.setForeground(HEADER_TEXT);
+        header.setFont(new Font("SansSerif", Font.BOLD, 10));
+
+        JScrollPane scroll = new JScrollPane(list);
+        scroll.setBorder(new LineBorder(ACCENT_COLOR, 1));
+        scroll.getViewport().setBackground(PANEL_COLOR);
+
+        // --- Ciemny styl paska przewijania ---
+        JScrollBar vertical = scroll.getVerticalScrollBar();
+        vertical.setPreferredSize(new Dimension(10, 0));
+        vertical.setBackground(BG_COLOR);
+
+        // Usuwanie standardowych przycisków strzałek dla lepszego wyglądu
+        vertical.setUI(new javax.swing.plaf.basic.BasicScrollBarUI() {
+            @Override
+            protected void configureScrollBarColors() {
+                this.thumbColor = ACCENT_COLOR;
+                this.trackColor = BG_COLOR;
+            }
+            @Override
+            protected JButton createDecreaseButton(int orientation) { return createZeroButton(); }
+            @Override
+            protected JButton createIncreaseButton(int orientation) { return createZeroButton(); }
+            private JButton createZeroButton() {
+                JButton b = new JButton();
+                b.setPreferredSize(new Dimension(0, 0));
+                return b;
+            }
+        });
+
+        panel.add(header, BorderLayout.NORTH);
+        panel.add(scroll, BorderLayout.CENTER);
+        return panel;
+    }
+
+    private void styleComponent(JComponent comp) {
+        comp.setBackground(PANEL_COLOR);
+        comp.setForeground(TEXT_COLOR);
+        comp.setFont(new Font("SansSerif", Font.PLAIN, 14));
+        comp.setBorder(new CompoundBorder(new LineBorder(ACCENT_COLOR), new EmptyBorder(8, 10, 8, 10)));
+    }
+
+    private JButton createFormalButton(String text) {
+        JButton btn = new JButton(text);
+        btn.setBackground(PANEL_COLOR);
+        btn.setForeground(TEXT_COLOR);
+        btn.setFont(new Font("SansSerif", Font.BOLD, 11));
+        btn.setFocusPainted(false);
+        btn.setBorder(new CompoundBorder(new LineBorder(ACCENT_COLOR), new EmptyBorder(8, 20, 8, 20)));
+        return btn;
+    }
+
+    /**
+     * Dodatkowa konfiguracja kolorów paska przewijania w UIManager.
+     */
+    private void customizeScrollbar() {
+        UIManager.put("ScrollBar.background", BG_COLOR);
+        UIManager.put("ScrollBar.foreground", PANEL_COLOR);
+        UIManager.put("ScrollBar.track", BG_COLOR);
+        UIManager.put("ScrollBar.thumb", ACCENT_COLOR);
+        UIManager.put("ScrollBar.thumbDarkShadow", ACCENT_COLOR);
+        UIManager.put("ScrollBar.thumbHighlight", ACCENT_COLOR);
+        UIManager.put("ScrollBar.thumbShadow", ACCENT_COLOR);
+        UIManager.put("ScrollBar.width", 12);
+    }
 
     public static void main(String[] args) {
-        SwingUtilities.invokeLater(() -> {
-            new GUI().setVisible(true);
-        });
+        try { UIManager.setLookAndFeel(UIManager.getCrossPlatformLookAndFeelClassName()); }
+        catch (Exception ignored) {}
+        SwingUtilities.invokeLater(() -> new GUI().setVisible(true));
     }
 }
