@@ -194,6 +194,30 @@ class WordTree {
         return !current.isEndOfWord && current.children.isEmpty();
     }
 
+    public List<String> findByEnglish(String englishFilter) {
+        List<String> results = new ArrayList<>();
+        findByEnglishRecursive(root, "", englishFilter.toUpperCase(), results);
+        return results;
+    }
+
+    private void findByEnglishRecursive(Node node, String currentWord, String filter, List<String> results) {
+        String word = (node.value == '*') ? "" : currentWord;
+
+        if (node.isEndOfWord) {
+            for (String trans : node.translations) {
+                if (trans.toUpperCase().contains(filter)) {
+                    results.add(word + ";" + trans);
+                }
+            }
+        }
+
+        for (List<Node> childList : node.children.values()) {
+            for (Node child : childList) {
+                findByEnglishRecursive(child, word + child.value, filter, results);
+            }
+        }
+    }
+
     /**
      * Zapisuje całą zawartość drzewa do pliku tekstowego w formacie UTF-8.
      */
@@ -233,24 +257,28 @@ class WordTree {
         File file = new File(filename);
         if (!file.exists()) return;
 
-        try (BufferedReader reader = new BufferedReader(new InputStreamReader(
-                new FileInputStream(file), StandardCharsets.UTF_8))) {
+        try (BufferedReader reader = new BufferedReader(
+                new InputStreamReader(new FileInputStream(file), StandardCharsets.UTF_8))) {
             String line;
             while ((line = reader.readLine()) != null) {
-                // Rozdzielamy polskie słowo od tłumaczeń (używając średnika jako separatora)
+                if (line.startsWith("\uFEFF")) {
+                    line = line.substring(1);
+                }
+
+
                 String[] parts = line.split(";");
                 if (parts.length == 2) {
-                    String polish = parts[0];
-                    String[] engTranslations = parts[1].split(",");
-                    // Dodajemy każde tłumaczenie do drzewa
-                    for (String eng : engTranslations) {
-                        addWord(polish, eng);
+                    String polish = parts[0].toUpperCase();
+                    String[] translations = parts[1].split(",");
+
+                    for (String eng : translations) {
+                        addWord(polish, eng.trim().toUpperCase());
                     }
                 }
             }
-            System.out.println("Słownik został pobrany z " + filename);
+
         } catch (IOException e) {
-            System.err.println("Błąd podczas ładowania: " + e.getMessage());
+            System.err.println("Error: " + e.getMessage());
         }
     }
 }

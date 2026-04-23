@@ -22,6 +22,7 @@ public class GUI extends JFrame {
 
     private WordTree tree = new WordTree();
 
+    private boolean isReversed = false; // false: PL -> EN, true: EN -> PL
     public GUI() {
         // Wczytanie słownika z pliku przy starcie
         tree.loadFromFile("dictionary.txt");
@@ -91,15 +92,47 @@ public class GUI extends JFrame {
         mainPanel.add(splitPane, BorderLayout.CENTER);
 
         // --- Przyciski (Dół) ---
+        JPanel bottomPanel = new JPanel(new BorderLayout());
+        bottomPanel.setOpaque(false);
+
+
+        JLabel authorLabel = new JLabel("3ID12A Mykyta Lytvyn, Konrad Prokop");
+        authorLabel.setForeground(HEADER_TEXT);
+        authorLabel.setFont(new Font("SansSerif", Font.ITALIC, 12));
+        authorLabel.setBorder(new EmptyBorder(0, 5, 0, 0));
+
         JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 0));
         buttonPanel.setOpaque(false);
-
         JButton addButton = createFormalButton("+ DODAJ SŁOWO");
         JButton deleteButton = createFormalButton("- USUŃ WYBRANE");
 
+
+        JButton reverseButton = createFormalButton("⇄ REVERS");
+        reverseButton.addActionListener(e -> {
+            isReversed = !isReversed;
+
+            JLabel leftHeader = (JLabel) ((JPanel) splitPane.getLeftComponent()).getComponent(0);
+            JLabel rightHeader = (JLabel) ((JPanel) splitPane.getRightComponent()).getComponent(0);
+
+            if (isReversed) {
+                leftHeader.setText("TŁUMACZENIE ANGIELSKIE");
+                rightHeader.setText("POLSKIE SŁOWA");
+            } else {
+                leftHeader.setText("POLSKIE SŁOWA");
+                rightHeader.setText("TŁUMACZENIE ANGIELSKIE");
+            }
+
+            refreshLists(searchField.getText());
+        });
+
+        buttonPanel.add(reverseButton);
         buttonPanel.add(deleteButton);
         buttonPanel.add(addButton);
-        mainPanel.add(buttonPanel, BorderLayout.SOUTH);
+
+        bottomPanel.add(authorLabel, BorderLayout.WEST);
+        bottomPanel.add(buttonPanel, BorderLayout.EAST);
+
+        mainPanel.add(bottomPanel, BorderLayout.SOUTH);
 
         // Powiązanie przycisków z logiką WordTree
         addButton.addActionListener(e -> openAddDialog());
@@ -156,12 +189,15 @@ public class GUI extends JFrame {
     private void deleteSelectedEntry() {
         int index = polishList.getSelectedIndex();
         if (index != -1) {
-            String polishWord = polishModel.getElementAt(index);
-            String englishWord = englishModel.getElementAt(index);
+            String word1 = polishModel.getElementAt(index);
+            String word2 = englishModel.getElementAt(index);
+
+
+            String polishWord = isReversed ? word2 : word1;
+            String englishWord = isReversed ? word1 : word2;
 
             tree.deleteTranslation(polishWord, englishWord);
-            tree.saveToFile("dictionary.txt"); // Zapis do pliku po usunięciu
-
+            tree.saveToFile("dictionary.txt");
             refreshLists(searchField.getText());
         } else {
             JOptionPane.showMessageDialog(this, "Wybierz słowo z listy do usunięcia.");
@@ -174,9 +210,45 @@ public class GUI extends JFrame {
     private void refreshLists(String filter) {
         polishModel.clear();
         englishModel.clear();
-        fillModelsFromTree(tree.root, "", filter);
+
+        String search = filter.trim().toUpperCase();
+
+        if (search.isEmpty()) {
+            fillModelsFromTree(tree.root, "", "");
+        } else {
+
+            Node startNode = findPrefixNode(search);
+            if (startNode != null) {
+
+                fillModelsFromTree(startNode, search, "");
+            }
+
+
+            for (String res : tree.findByEnglish(search)) {
+                String[] parts = res.split(";");
+                if (isReversed) {
+                    polishModel.addElement(parts[1]); // English in left column
+                    englishModel.addElement(parts[0]); // Polish in right column
+                } else {
+                    polishModel.addElement(parts[0]);
+                    englishModel.addElement(parts[1]);
+                }
+            }
+        }
     }
 
+
+
+
+    private Node findPrefixNode(String prefix) {
+        Node current = tree.root;
+        for (char c : prefix.toCharArray()) {
+            java.util.List<Node> nodes = current.children.get(c);
+            if (nodes == null || nodes.isEmpty()) return null;
+            current = nodes.get(0);
+        }
+        return current;
+    }
     /**
      * Rekurencyjnie przeszukuje drzewo w celu znalezienia słów pasujących do filtra.
      */
@@ -184,16 +256,21 @@ public class GUI extends JFrame {
         String wordToDisplay = (node.value == '*') ? "" : currentWord;
 
         if (node.isEndOfWord) {
-            // Filtracja typu "zawiera" (można zmienić na startsWith dla dopasowania od początku)
             if (filter.isEmpty() || wordToDisplay.contains(filter.toUpperCase())) {
                 for (String trans : node.translations) {
-                    polishModel.addElement(wordToDisplay);
-                    englishModel.addElement(trans);
+                    if (isReversed) {
+
+                        polishModel.addElement(trans);
+                        englishModel.addElement(wordToDisplay);
+                    } else {
+
+                        polishModel.addElement(wordToDisplay);
+                        englishModel.addElement(trans);
+                    }
                 }
             }
         }
 
-        // Przejście przez wszystkie dzieci węzła
         for (java.util.List<Node> childList : node.children.values()) {
             for (Node child : childList) {
                 fillModelsFromTree(child, wordToDisplay + child.value, filter);
@@ -209,7 +286,7 @@ public class GUI extends JFrame {
         list.setForeground(TEXT_COLOR);
         list.setSelectionBackground(ACCENT_COLOR);
         list.setSelectionForeground(Color.WHITE);
-        list.setFont(new Font("Monospaced", Font.PLAIN, 14));
+        list.setFont(new Font("SansSerif", Font.PLAIN, 14));
         list.setFixedCellHeight(30);
         return list;
     }
